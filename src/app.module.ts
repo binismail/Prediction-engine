@@ -33,7 +33,7 @@ import { join } from 'path';
     }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'demo'), // Serve "demo" folder
-      exclude: ['/api/(.*)'], // Don't block API routes
+      exclude: ['/api/(.*)'], // Fix for path-to-regexp: requires named capture
     }),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
@@ -42,11 +42,21 @@ import { join } from 'path';
       useFactory: (configService: ConfigService) => configService.getOrThrow('database'),
       inject: [ConfigService],
     }),
-    BullModule.forRoot({
-      redis: {
-        host: 'localhost',
-        port: 6379,
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => {
+        const url = configService.get<string>('REDIS_URL');
+        if (url) {
+            return { url }; // Railway provides REDIS_URL
+        } 
+        return {
+            redis: {
+                host: 'localhost',
+                port: 6379,
+            }
+        };
       },
+      inject: [ConfigService],
     }),
     TypeOrmModule.forFeature([Market, Trade, Position, User, MarketEvent]),
     LedgerModule, // Global Module
