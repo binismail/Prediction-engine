@@ -33,7 +33,7 @@ import { join } from 'path';
     }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'demo'), // Serve "demo" folder
-      exclude: ['/api/(.*)'], // Fix for path-to-regexp: requires named capture
+      exclude: ['/api/(.*)'], // Fix: Use named capture group for path-to-regexp
     }),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
