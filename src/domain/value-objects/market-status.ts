@@ -1,0 +1,9 @@
+export enum MarketStatus {
+  PENDING = 'PENDING',
+  ACTIVE = 'ACTIVE',
+  LOCKED = 'LOCKED',
+  RESOLVING = 'RESOLVING',
+  SETTLED = 'SETTLED',
+  DISPUTED = 'DISPUTED',
+  PAUSED = 'PAUSED',
+}

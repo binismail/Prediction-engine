@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delphi Dashboard 🏛️</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --accent: #3b82f6; --success: #22c55e; --danger: #ef4444; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; height: 100vh; box-sizing: border-box; }
+        .panel { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #334155; overflow-y: auto; }
+        h2 { margin-top: 0; font-size: 1.2em; border-bottom: 1px solid #334155; padding-bottom: 10px; }
+        button { background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px; }
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        input { background: #0f172a; border: 1px solid #334155; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+        
+        .market-card { background: #0f172a; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #334155; }
+        .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .bar-bg { height: 8px; background: var(--danger); border-radius: 4px; overflow: hidden; margin: 10px 0; }
+        .bar-fill { height: 100%; background: var(--success); width: 50%; transition: width 0.5s; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .btn-yes { background: var(--success); }
+        .btn-no { background: var(--danger); }
+        .log-entry { font-size: 0.8em; padding: 5px 0; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; }
+        
+        /* SVG Chart */
+        .chart-container { height: 120px; width: 100%; position: relative; border-bottom: 1px solid #334155; margin-bottom: 10px; }
+        svg { width: 100%; height: 100%; }
+        path { fill: none; stroke: var(--success); stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center; }
+        .modal { background: var(--card); padding:20px; border-radius:12px; border:1px solid #334155; width:300px; }
+        .stat-row { display:flex; justify-content:space-between; margin:10px 0; font-size:0.9em; color:#94a3b8; }
+        .stat-val { color:white; font-family:monospace; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. User Panel -->
+    <div class="panel">
+        <h2>👤 User Profile</h2>
+        <div id="login-form">
+            <p>Wallet Address</p>
+            <input type="text" id="wallet" value="0x123">
+            <button onclick="handleLogin()" id="btn-login">Login / Create</button>
+            <p id="login-msg" style="color: #ef4444; font-size: 0.8em;"></p>
+        </div>
+
+        <div id="user-dash" style="display:none;">
+            <p style="color: #94a3b8; font-size: 0.9em;">ID: <span id="uid">...</span></p>
+            <h1>$<span id="balance">0.00</span></h1>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <button onclick="faucet(100)" style="background:#475569">+100</button>
+                <button onclick="faucet(1000)" style="background:#475569">+1k</button>
+            </div>
+            
+            <h3>My Positions</h3>
+            <div id="positions"></div>
+        </div>
+    </div>
+
+    <!-- 2. Markets Panel -->
+    <div class="panel">
+        <div class="row">
+            <h2>📈 Markets</h2>
+            <button onclick="refreshData()" style="width: auto; background: #475569; font-size:0.8em;">↻</button>
+        </div>
+        <div id="market-list">Waiting for login...</div>
+    </div>
+
+    <!-- 3. Ledger Panel -->
+    <div class="panel">
+        <h2>📒 Ledger</h2>
+        <div id="ledger"></div>
+    </div>
+
+    <!-- TRADE MODAL -->
+    <div id="trade-modal" class="modal-overlay">
+        <div class="modal">
+            <h3 id="modal-title">Buy YES</h3>
+            <div style="font-size:0.8em; color:#94a3b8; margin-bottom:15px;" id="modal-market">...</div>
+            
+            <p>Amount (USDC)</p>
+            <input type="number" id="trade-amount" value="100" oninput="calcTrade()">
+            
+            <div class="stat-row">
+                <span>Price:</span>
+                <span id="modal-price" class="stat-val">0.50</span>
+            </div>
+            <div class="stat-row">
+                <span>Est. Shares:</span>
+                <span id="modal-shares" class="stat-val">0.0</span>
+            </div>
+            <div class="stat-row">
+                <span>Potential Payout:</span>
+                <span id="modal-payout" class="stat-val" style="color:var(--success)">$0.00</span>
+            </div>
+
+            <div class="actions">
+                <button id="btn-confirm" onclick="confirmTrade()">Confirm Trade</button>
+                <button onclick="closeModal()" style="background:#475569">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = ''; // Relative path for production
+        let user = null;
+        let isPolling = false;
+
+        // --- AUTH ---
+        async function handleLogin() {
+            const btn = document.getElementById('btn-login');
+            const msg = document.getElementById('login-msg');
+            const wallet = document.getElementById('wallet').value;
+            
+            if(!wallet) return;
+            
+            btn.disabled = true;
+            btn.innerText = 'Connecting...';
+            msg.innerText = '';
+
+            try {
+                const res = await fetch(`${API}/users`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ walletAddress: wallet })
+                });
+                
+                if(!res.ok) throw new Error('Login failed');
+                
+                user = await res.json();
+                
+                // Switch UI
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('user-dash').style.display = 'block';
+                document.getElementById('uid').innerText = user.id.substring(0, 8);
+                document.getElementById('market-list').innerText = 'Loading markets...';
+                
+                startPolling();
+                
+            } catch (e) {
+                console.error(e);
+                msg.innerText = 'Connection Error: Make sure backend is running.';
+                btn.disabled = false;
+                btn.innerText = 'Login / Create';
+            }
+        }
+
+        async function faucet(amount) {
+            if(!user) return;
+            await fetch(`${API}/users/${user.id}/deposit`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ amount })
+            });
+            refreshData();
+        }
+
+        // --- CORE LOOP ---
+        function startPolling() {
+            if(isPolling) return;
+            isPolling = true;
+            loop();
+        }
+
+        async function loop() {
+            await refreshData();
+            setTimeout(loop, 4000); // 4s interval
+        }
+
+        // Global cache
+        let marketCache = {};
+
+        async function refreshData() {
+            if(!user) return;
+            
+            try {
+                // 1. Fetch Markets First (to build cache)
+                const mRes = await fetch(`${API}/markets`);
+                const markets = await mRes.json();
+                
+                // Update Cache
+                markets.forEach(m => marketCache[m.id] = m);
+                
+                renderMarkets(markets);
+
+                // 2. User Data (depends on market cache for status)
+                const uRes = await fetch(`${API}/users/${user.id}`);
+                const uData = await uRes.json();
+                document.getElementById('balance').innerText = parseFloat(uData.availableBalance).toFixed(2);
+                renderPositions(uData.positions);
+
+                // 3. Ledger
+                const lRes = await fetch(`${API}/users/${user.id}/transactions`);
+                const ledger = await lRes.json();
+                renderLedger(ledger);
+
+            } catch(e) { console.error("Poll error", e); }
+        }
+
+        // --- RENDERERS ---
+        function renderPositions(positions) {
+            const container = document.getElementById('positions');
+            container.innerHTML = '';
+            
+            // Sort active first
+            positions.sort((a,b) => {
+               const mA = marketCache[a.marketId];
+               const mB = marketCache[b.marketId];
+               if(mA && mB && mA.status === 'ACTIVE' && mB.status !== 'ACTIVE') return -1;
+               return 0;
+            });
+
+            positions.forEach(p => {
+                const yes = parseFloat(p.yesShares);
+                const no = parseFloat(p.noShares);
+                const market = marketCache[p.marketId];
+                const isSettled = market && market.status !== 'ACTIVE';
+
+                // Only show if > 0.1 shares
+                if(yes > 0.1 || no > 0.1) {
+                    const div = document.createElement('div');
+                    div.className = 'market-card';
+                    div.style.padding = '10px';
+                    if(isSettled) div.style.opacity = '0.5';
+                    
+                    let buttons = '';
+                    if(!isSettled) {
+                        if(yes > 0.1) buttons += `<button onclick="sell('${p.marketId}', 'YES', ${yes})" style="background:var(--success); font-size:0.8em; margin-bottom:5px;">Sell ${yes.toFixed(1)} YES</button>`;
+                        if(no > 0.1) buttons += `<button onclick="sell('${p.marketId}', 'NO', ${no})" style="background:var(--danger); font-size:0.8em;">Sell ${no.toFixed(1)} NO</button>`;
+                    } else {
+                        buttons = `<div style="font-size:0.75em; color:#94a3b8; text-align:center; padding:5px; background:#1e293b; border-radius:4px;">MARKET SETTLED (Payouts Sent)</div>`;
+                    }
+
+                    div.innerHTML = `
+                        <div style="font-size:0.8em; color:#94a3b8; margin-bottom:5px;">${p.marketId.substring(0,8)}...</div>
+                        ${buttons}
+                    `;
+                    container.appendChild(div);
+                }
+            });
+        }
+
+        async function renderMarkets(markets) {
+            const container = document.getElementById('market-list');
+            if(container.innerText === 'Loading markets...' || container.innerText === 'Waiting for login...') {
+                container.innerHTML = ''; // Clear loading text
+            }
+
+            // Sort: ACTIVE first, then by newest
+            markets.sort((a, b) => {
+                if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
+                if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            });
+
+            for(const m of markets) {
+                let card = document.getElementById(`m-${m.id}`);
+                
+                // Calc stats
+                const yes = parseFloat(m.poolYesBalance) || 100;
+                const no = parseFloat(m.poolNoBalance) || 100;
+                const total = yes + no;
+                const prob = (yes / total) * 100;
+                const pYes = (yes / total).toFixed(2);
+                const pNo = (no / total).toFixed(2);
+
+                const isActive = m.status === 'ACTIVE';
+                const statusColor = isActive ? 'var(--success)' : '#94a3b8';
+
+                if(!card) {
+                    card = document.createElement('div');
+                    card.id = `m-${m.id}`;
+                    card.className = 'market-card';
+                    card.style.opacity = isActive ? '1' : '0.7';
+                    card.innerHTML = `
+                        <div class="row">
+                            <span style="font-weight:bold;">${m.question}</span>
+                            <span style="font-size:0.75em; padding:2px 6px; border-radius:4px; background:${statusColor}; color:#000; font-weight:bold;">${m.status}</span>
+                        </div>
+                        <div style="font-size:0.8em; color:#fff; font-family:monospace; margin-bottom:10px;">${m.ticker}</div>
+                        
+                        <div class="chart-container">
+                            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                                <path id="path-${m.id}" d="" />
+                            </svg>
+                        </div>
+
+                        <div class="row" style="font-size:0.9em;">
+                            <span style="color:var(--success)">YES $${pYes}</span>
+                            <span style="color:var(--danger)">NO $${pNo}</span>
+                        </div>
+                        <div class="bar-bg"><div id="bar-${m.id}" class="bar-fill" style="width:${prob}%"></div></div>
+                        
+                        <div class="actions">
+                            <button class="btn-yes" onclick="openTradeModal('${m.id}', '${m.ticker}', 'YES', ${pYes})" ${!isActive ? 'disabled' : ''}>Buy YES</button>
+                            <button class="btn-no" onclick="openTradeModal('${m.id}', '${m.ticker}', 'NO', ${pNo})" ${!isActive ? 'disabled' : ''}>Buy NO</button>
+                        </div>
+                    `;
+                    container.appendChild(card); // Append sorted
+                } else {
+                    // Update DOM (Simple)
+                    document.getElementById(`bar-${m.id}`).style.width = `${prob}%`;
+                    const badge = card.querySelector('span[style*="background"]');
+                    if(badge) {
+                        badge.innerText = m.status;
+                        badge.style.background = statusColor;
+                    }
+                    card.querySelector('.row:nth-last-child(2)').innerHTML = `
+                        <span style="color:var(--success)">YES $${pYes}</span>
+                        <span style="color:var(--danger)">NO $${pNo}</span>
+                    `;
+                    // Update buttons
+                    const btns = card.querySelectorAll('button');
+                    btns.forEach(b => b.disabled = !isActive);
+                }
+                
+                // Draw Chart
+                await drawChart(m.id);
+            }
+        }
+
+        async function drawChart(marketId) {
+            try {
+                const res = await fetch(`${API}/markets/${marketId}/history`);
+                const data = await res.json();
+                if(!data.length) return;
+
+                // Map Time(x) and Price(y) to 0-100 coords
+                const startTime = new Date(data[0].time).getTime();
+                const endTime = new Date().getTime();
+                const duration = endTime - startTime || 1;
+
+                const points = data.map(d => {
+                    const t = new Date(d.time).getTime();
+                    const x = ((t - startTime) / duration) * 100;
+                    const y = (1 - d.price) * 100; // Invert Y (0 is top)
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                });
+                
+                // Add current point
+                points.push(`100,${points[points.length-1].split(',')[1]}`);
+
+                const d = `M ${points.join(' L ')}`;
+                const path = document.getElementById(`path-${marketId}`);
+                if(path) path.setAttribute('d', d);
+
+            } catch(e) {}
+        }
+
+        function renderLedger(txs) {
+            const container = document.getElementById('ledger');
+            container.innerHTML = '';
+            txs.slice(0, 50).forEach(tx => {
+                const div = document.createElement('div');
+                div.className = 'log-entry';
+                let color = '#fff';
+                if(tx.type === 'DEPOSIT') color = 'var(--success)';
+                if(tx.type === 'WIN_PAYOUT') color = '#f59e0b';
+                
+                div.innerHTML = `
+                    <span style="color:${color}">${tx.type}</span>
+                    <span>${parseFloat(tx.amount).toFixed(2)}</span>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // --- MODAL LOGIC ---
+        let pendingTrade = null;
+
+        function openTradeModal(marketId, ticker, side, price) {
+            pendingTrade = { marketId, side, price };
+            
+            document.getElementById('trade-modal').style.display = 'flex';
+            document.getElementById('modal-title').innerText = `Buy ${side}`;
+            document.getElementById('modal-market').innerText = ticker;
+            document.getElementById('modal-price').innerText = `$${price.toFixed(2)}`;
+            
+            // Set Color
+            const btn = document.getElementById('btn-confirm');
+            btn.style.background = side === 'YES' ? 'var(--success)' : 'var(--danger)';
+            btn.innerText = `Buy ${side}`;
+            
+            calcTrade();
+        }
+
+        function calcTrade() {
+            const amount = parseFloat(document.getElementById('trade-amount').value) || 0;
+            const price = pendingTrade.price || 0.5;
+            
+            // Est Shares = Amount / Price
+            // Note: This is an estimation. In AMM, price moves. logic simplified for demo.
+            const shares = amount / price;
+            const payout = shares * 1.00; // Each share pays $1.00 if won
+
+            document.getElementById('modal-shares').innerText = shares.toFixed(2);
+            document.getElementById('modal-payout').innerText = `$${payout.toFixed(2)}`;
+        }
+
+        async function confirmTrade() {
+            if(!pendingTrade) return;
+            const amount = parseFloat(document.getElementById('trade-amount').value);
+            
+            await fetch(`${API}/trading`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    marketId: pendingTrade.marketId, 
+                    userId: user.id, 
+                    side: pendingTrade.side, 
+                    amount: amount
+                })
+            });
+            
+            closeModal();
+            refreshData();
+        }
+
+        function closeModal() {
+            document.getElementById('trade-modal').style.display = 'none';
+            pendingTrade = null;
+        }
+
+        async function sell(marketId, side, amount) {
+            if(!confirm(`Sell ${amount.toFixed(2)} ${side} shares?`)) return;
+            
+            await fetch(`${API}/trading/sell`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    marketId, userId: user.id, side, shares: amount
+                })
+            });
+            refreshData();
+        }
+
+    </script>
+</body>
+</html>

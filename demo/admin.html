@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delphi Admin 🛡️</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --accent: #8b5cf6; --success: #22c55e; --danger: #ef4444; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; display: grid; grid-template-columns: 1fr; gap: 20px; box-sizing: border-box; }
+        .panel { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; }
+        h2 { margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 10px; color: var(--accent); }
+        button { background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button:hover { opacity: 0.9; }
+        input, select { background: #0f172a; border: 1px solid #334155; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+        .row { display: flex; gap: 10px; }
+        .market-item { background: #0f172a; padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+        .badge { font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: #334155; }
+        .status-ACTIVE { background: var(--success); color: black; }
+        .status-SETTLED { background: #94a3b8; color: black; }
+        .status-PAUSED { background: #f59e0b; color: black; }
+    </style>
+</head>
+<body>
+
+    <!-- LOGIN -->
+    <div id="login-panel" class="panel" style="max-width: 400px; margin: 50px auto;">
+        <h2>🔐 Admin Login</h2>
+        <input type="email" id="email" value="admin123@gmail.com" placeholder="Email">
+        <input type="password" id="password" value="admin123" placeholder="Password">
+        <button onclick="login()" style="width:100%">Enter Dashboard</button>
+        <p id="msg" style="color:var(--danger); font-size:0.9em; min-height:1em;"></p>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dash" style="display:none; max-width: 800px; margin: 0 auto;">
+        
+        <!-- HEADER -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h1>🛡️ Admin Console</h1>
+            <button onclick="logout()" style="background:#334155;">Logout</button>
+        </div>
+
+        <!-- STATS -->
+        <div class="panel">
+            <h2>📊 System Stats</h2>
+            <div class="row" id="stats">Loading...</div>
+        </div>
+
+        <!-- CREATE MARKET -->
+        <div class="panel">
+            <h2>➕ Create Market</h2>
+            <p>Ticker (Auto-generated if empty)</p>
+            <input type="text" id="m-ticker" placeholder="e.g. BTC-2024">
+            
+            <p>Question</p>
+            <input type="text" id="m-question" placeholder="Will X happen?">
+            
+            <div class="row">
+                <div style="flex:1">
+                    <p>Expiry (Minutes from now)</p>
+                    <input type="number" id="m-expiry" value="10">
+                </div>
+                <div style="flex:1">
+                    <p>Initial Liquidity (USDC)</p>
+                    <input type="number" id="m-liquidity" value="1000">
+                </div>
+            </div>
+
+            <button onclick="createMarket()">🚀 Launch Market</button>
+        </div>
+
+        <!-- MANAGE MARKETS -->
+        <div class="panel">
+            <div style="display:flex; justify-content:space-between;">
+                <h2>⚙️ Manage Markets</h2>
+                <button onclick="loadMarkets()" style="font-size:0.8em; padding:5px 10px; background:#334155">↻</button>
+            </div>
+            <div id="market-list"></div>
+        </div>
+
+    </div>
+
+    <script>
+        const API = 'http://localhost:3000'; // Or relative '' for prod
+        let token = null; // Admin doesn't use JWT in this simple demo, just basic checks. Real app would use JWT.
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const msg = document.getElementById('msg');
+
+            try {
+                const res = await fetch(`${API}/users/admin/login`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ email, password })
+                });
+
+                if(!res.ok) throw new Error((await res.json()).message || 'Login failed');
+
+                const user = await res.json();
+                document.getElementById('login-panel').style.display = 'none';
+                document.getElementById('dash').style.display = 'block';
+                loadStats();
+                loadMarkets();
+
+            } catch(e) {
+                msg.innerText = e.message;
+            }
+        }
+
+        function logout() {
+            location.reload();
+        }
+
+        async function loadStats() {
+            const res = await fetch(`${API}/admin/system/stats`);
+            const data = await res.json();
+            document.getElementById('stats').innerHTML = `
+                <div style="flex:1; background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+                    <div style="color:#94a3b8; font-size:0.8em">Markets</div>
+                    <div style="font-size:1.5em; font-weight:bold">${data.markets}</div>
+                </div>
+                <div style="flex:1; background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+                    <div style="color:#94a3b8; font-size:0.8em">Trades</div>
+                    <div style="font-size:1.5em; font-weight:bold">${data.trades}</div>
+                </div>
+                <div style="flex:1; background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+                    <div style="color:#94a3b8; font-size:0.8em">Volume</div>
+                    <div style="font-size:1.5em; font-weight:bold; color:var(--success)">$${parseFloat(data.totalVolumeUSDC).toFixed(0)}</div>
+                </div>
+            `;
+        }
+
+        async function createMarket() {
+            const ticker = document.getElementById('m-ticker').value;
+            const question = document.getElementById('m-question').value;
+            const expiryMins = document.getElementById('m-expiry').value;
+            const liquidity = document.getElementById('m-liquidity').value;
+
+            if(!question) return alert('Question is required');
+
+            const expiryDate = new Date(Date.now() + expiryMins * 60 * 1000);
+
+            try {
+                const res = await fetch(`${API}/admin/markets`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        ticker,
+                        question,
+                        expiryAt: expiryDate.toISOString(),
+                        initialLiquidity: liquidity,
+                        resolutionCriteria: 'Manual Admin Resolution'
+                    })
+                });
+                
+                if(res.ok) {
+                    alert('Market Created!');
+                    loadMarkets();
+                    loadStats();
+                    // Clear inputs
+                    document.getElementById('m-question').value = '';
+                    document.getElementById('m-ticker').value = '';
+                }
+            } catch(e) { alert('Error: ' + e.message); }
+        }
+
+        async function loadMarkets() {
+            const res = await fetch(`${API}/markets`);
+            const markets = await res.json();
+            // Sort active first
+            markets.sort((a,b) => (a.status === 'ACTIVE' ? -1 : 1));
+
+            const list = document.getElementById('market-list');
+            list.innerHTML = '';
+            
+            markets.forEach(m => {
+                const div = document.createElement('div');
+                div.className = 'market-item';
+                div.style.opacity = m.status === 'ACTIVE' ? '1' : '0.6';
+
+                let actions = '';
+                if(m.status === 'ACTIVE') {
+                    actions = `
+                        <button onclick="resolve('${m.id}', 'YES')" style="background:var(--success); font-size:0.75em; padding:5px 10px;">Win YES</button>
+                        <button onclick="resolve('${m.id}', 'NO')" style="background:var(--danger); font-size:0.75em; padding:5px 10px;">Win NO</button>
+                        <button onclick="pause('${m.id}')" style="background:#f59e0b; font-size:0.75em; padding:5px 10px;">⏸</button>
+                    `;
+                } else if(m.status === 'PAUSED') {
+                    actions = `<button onclick="resume('${m.id}')" style="background:var(--success); font-size:0.75em;">▶ Resume</button>`;
+                } else {
+                    actions = `<span style="color:#94a3b8; font-size:0.8em">Settled: ${m.status}</span>`;
+                }
+
+                div.innerHTML = `
+                    <div style="flex:1">
+                        <div style="font-weight:bold">${m.question}</div>
+                        <div style="font-size:0.8em; color:#94a3b8">
+                            ${m.ticker} • 
+                            <span class="badge status-${m.status}">${m.status}</span>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:5px;">${actions}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        async function resolve(id, outcome) {
+            if(!confirm(`Force resolve market to ${outcome}?`)) return;
+            await fetch(`${API}/admin/markets/${id}/resolve`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ outcome })
+            });
+            loadMarkets();
+        }
+
+        async function pause(id) {
+            await fetch(`${API}/admin/markets/${id}/pause`, { method: 'POST' });
+            loadMarkets();
+        }
+        
+        async function resume(id) {
+            await fetch(`${API}/admin/markets/${id}/resume`, { method: 'POST' });
+            loadMarkets();
+        }
+
+    </script>
+</body>
+</html>
